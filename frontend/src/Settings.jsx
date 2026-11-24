@@ -97,7 +97,7 @@ export default function Settings({ state, act, busy, collect }) {
         <div className="row">
           <Field label="Основной провайдер">
             <select {...field("provider")}>
-              <option value="infercom">Infercom · gpt-oss-120b</option>
+              <option value="infercom">Infercom</option>
               <option value="gemini">Gemini</option>
             </select>
           </Field>

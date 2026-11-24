@@ -1,36 +1,23 @@
-"""Small Infercom connectivity probe, without sending CV/profile data."""
+"""Check one configured provider using a short prompt."""
+import argparse
 
-import json
-from urllib.error import HTTPError
-from urllib.request import Request, urlopen
-
-from .core import get_key
+from .core import complete_prompt
+from .credentials import get_key, model_name
 
 
 def main():
-    key = get_key("INFERCOM_API_KEY")
-    if not key:
-        print("Infercom: key not configured")
-        return
-    request = Request(
-        "https://api.infercom.ai/v1/chat/completions",
-        data=json.dumps(
-            {
-                "model": "gpt-oss-120b",
-                "messages": [{"role": "user", "content": "Reply with OK."}],
-                "max_tokens": 64,
-            }
-        ).encode(),
-        headers={"Content-Type": "application/json", "Authorization": "Bearer " + key},
-    )
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("provider", choices=("infercom", "gemini"),
+                        nargs="?", default="infercom")
+    provider = parser.parse_args().provider
+    variable = "INFERCOM_API_KEY" if provider == "infercom" else "GEMINI_API"
+    if not get_key(variable):
+        parser.exit(1, f"Set {variable} in .env before testing {provider}.\n")
     try:
-        with urlopen(request, timeout=30) as response:
-            data = json.load(response)
-        print("Infercom: connected; response received:", bool(data.get("choices")))
-    except HTTPError as exc:
-        print("Infercom HTTP status:", exc.code)
-    except Exception as exc:
-        print("Infercom:", type(exc).__name__)
+        complete_prompt("Reply with OK.", {"provider": provider, "fallback": False})
+    except RuntimeError as error:
+        parser.exit(1, f"{model_name(provider)}: {error}\n")
+    print(f"{provider} / {model_name(provider)}: response received")
 
 
 if __name__ == "__main__":

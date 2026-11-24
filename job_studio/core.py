@@ -22,7 +22,7 @@ from urllib.parse import (
 )
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
-from .credentials import get_key
+from .credentials import get_key, model_name
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = (
@@ -435,7 +435,7 @@ def complete_prompt(prompt, cfg):
                 if not key:
                     raise ValueError("Infercom key missing")
                 payload = {
-                    "model": "gpt-oss-120b",
+                    "model": model_name("infercom"),
                     "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": 1800,
                 }
@@ -457,7 +457,7 @@ def complete_prompt(prompt, cfg):
                     raise ValueError("Gemini key missing")
                 client = genai.Client(api_key=key)
                 text = client.models.generate_content(
-                    model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite"),
+                    model=model_name("gemini"),
                     contents=prompt,
                 ).text
             if not text or not text.strip():
