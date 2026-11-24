@@ -3,7 +3,7 @@
 import json
 from typing import Literal
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 from mcp.server.fastmcp import FastMCP
@@ -67,21 +67,13 @@ def request(path, payload=None):
 @mcp.tool()
 def studio_status() -> dict:
     """Read running tasks and unanswered application questions, without all vacancy text."""
-    state = request("/api/state")
-    result = {key: state[key] for key in ("run", "application", "parse_plus")}
-    for key in ("run", "parse_plus"):
-        result[key] = {k: v for k, v in result[key].items() if k != "events"}
-    result["job_count"] = len(state["jobs"])
-    from datetime import datetime, timedelta, timezone
+    return request("/api/mcp/status")
 
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
-    result["new_last_24h"] = sum(
-        1
-        for j in state["jobs"]
-        if j.get("published_at", "") >= cutoff
-        and j["status"] not in ("applied", "archived")
-    )
-    return result
+
+@mcp.tool()
+def application_diagnostics() -> dict:
+    """Inspect full current browser diagnostics on demand after a pause or failure."""
+    return request("/api/mcp/application-diagnostics")
 
 
 @mcp.tool()
@@ -91,41 +83,12 @@ def list_vacancies(
     """Compact vacancies ordered newest publication first; unknown dates last. No descriptions or letters; use get_vacancy for details."""
     if offset < 0 or not 1 <= limit <= 50:
         raise ValueError("Use offset >= 0 and limit 1..50")
-    jobs = [
-        j
-        for j in request("/api/state")["jobs"]
-        if (not status or j["status"] == status)
-        and query.casefold()
-        in (
-            " ".join(
-                str(j.get(k) or "") for k in ("title", "company", "location", "source")
-            )
-        ).casefold()
-    ]
-    jobs.sort(
-        key=lambda j: (
-            bool(j.get("published_at")),
-            j.get("published_at") or "",
-            j.get("created") or "",
-        ),
-        reverse=True,
+    return request(
+        "/api/mcp/vacancies?"
+        + urlencode(
+            {"query": query, "status": status, "offset": offset, "limit": limit}
+        )
     )
-    fields = (
-        "id",
-        "title",
-        "company",
-        "location",
-        "source",
-        "status",
-        "url",
-        "published_at",
-        "expires_at",
-    )
-    return {
-        "total": len(jobs),
-        "next_offset": offset + limit if offset + limit < len(jobs) else None,
-        "jobs": [{k: j.get(k) for k in fields} for j in jobs[offset : offset + limit]],
-    }
 
 
 @mcp.tool()
@@ -202,10 +165,9 @@ def recent_events(after_id: int = 0, limit: int = 20) -> dict:
     """Read up to 50 recent application events newer than a cursor. History API retains latest 150 events."""
     if not 1 <= limit <= 50:
         raise ValueError("Use limit 1..50")
-    events = [
-        e for e in request("/api/state")["application_events"] if e["id"] > after_id
-    ][:limit]
-    return {"events": events, "next_cursor": events[-1]["id"] if events else after_id}
+    return request(
+        "/api/mcp/events?" + urlencode({"after_id": after_id, "limit": limit})
+    )
 
 
 @mcp.tool()

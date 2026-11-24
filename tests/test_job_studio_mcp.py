@@ -29,18 +29,19 @@ class MCPTests(unittest.TestCase):
         }
 
     def test_compact_pagination(self):
-        with patch.object(api, "request", return_value=self.state()):
-            result = api.list_vacancies("python", offset=20, limit=20)
-        self.assertEqual(result["next_offset"], 40)
-        self.assertEqual(result["total"], 65)
-        self.assertNotIn("description", result["jobs"][0])
-        self.assertNotIn("draft", result["jobs"][0])
+        with patch.object(api, "request") as req:
+            api.list_vacancies("c++", offset=20, limit=20)
+        req.assert_called_once_with(
+            "/api/mcp/vacancies?query=c%2B%2B&status=&offset=20&limit=20"
+        )
 
-    def test_status_omits_lists_and_event_bulk(self):
-        with patch.object(api, "request", return_value=self.state()):
-            result = api.studio_status()
-        self.assertNotIn("jobs", result)
-        self.assertNotIn("events", result["run"])
+    def test_status_and_diagnostics_use_separate_reads(self):
+        with patch.object(api, "request") as req:
+            api.studio_status()
+            req.assert_called_once_with("/api/mcp/status")
+            req.reset_mock()
+            api.application_diagnostics()
+            req.assert_called_once_with("/api/mcp/application-diagnostics")
 
     def test_parse_does_not_apply(self):
         with patch.object(api, "request", return_value={"ok": True}) as req:
@@ -62,9 +63,9 @@ class MCPTests(unittest.TestCase):
         self.assertEqual(req.call_count, 1)
 
     def test_cursor(self):
-        with patch.object(api, "request", return_value=self.state()):
-            result = api.recent_events(3, 2)
-        self.assertEqual(result["next_cursor"], 5)
+        with patch.object(api, "request") as req:
+            api.recent_events(3, 2)
+        req.assert_called_once_with("/api/mcp/events?after_id=3&limit=2")
 
     def test_reject_remote_endpoint(self):
         with tempfile.TemporaryDirectory() as folder:
