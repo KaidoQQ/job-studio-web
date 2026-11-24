@@ -1,3 +1,4 @@
+import asyncio
 import json
 import tempfile
 import unittest
@@ -64,8 +65,10 @@ class MCPTests(unittest.TestCase):
 
     def test_cursor(self):
         with patch.object(api, "request") as req:
-            api.recent_events(3, 2)
-        req.assert_called_once_with("/api/mcp/events?after_id=3&limit=2")
+            asyncio.run(api.recent_events(3, 2, 30))
+        req.assert_called_once_with(
+            "/api/mcp/events?after_id=3&limit=2&wait_seconds=30", timeout=40
+        )
 
     def test_reject_remote_endpoint(self):
         with tempfile.TemporaryDirectory() as folder:

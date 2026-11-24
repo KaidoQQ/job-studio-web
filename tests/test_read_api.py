@@ -57,7 +57,9 @@ class CompactReads(unittest.TestCase):
         self.assertNotIn("secret", json.dumps(before))
 
     def test_bounded_cursor_window_and_empty_db(self):
-        self.assertEqual(read_api.events(), {"events": [], "next_cursor": 0})
+        self.assertEqual(
+            read_api.events(), {"events": [], "next_cursor": 0, "gap": False}
+        )
         # record normally has an application row; only the event stream is relevant here.
         from job_studio.applications import create_attempt
 
@@ -70,5 +72,21 @@ class CompactReads(unittest.TestCase):
                 "INSERT INTO application_events(job_id,state,message,created) VALUES('foo','filling','event',?)",
                 [(n,) for n in range(155)],
             )
-        self.assertEqual([e["id"] for e in read_api.events(0, 2)["events"]], [7, 8])
-        self.assertEqual(read_api.events(156), {"events": [], "next_cursor": 156})
+        lost = read_api.events(4, 2, 30)
+        self.assertTrue(lost["gap"])
+        self.assertEqual(
+            lost["recovery"],
+            {
+                "reason": "history_gap",
+                "oldest_id": 7,
+                "latest_id": 156,
+                "latest_job_id": "foo",
+                "latest_state": "filling",
+            },
+        )
+        self.assertEqual([e["id"] for e in lost["events"]], [7, 8])
+        self.assertFalse(read_api.events(6, 2)["gap"])
+        self.assertEqual(read_api.events(lost["next_cursor"], 2)["next_cursor"], 10)
+        self.assertEqual(
+            read_api.events(156), {"events": [], "next_cursor": 156, "gap": False}
+        )

@@ -13,6 +13,9 @@ from urllib.parse import urlsplit
 from . import core
 from .site_bots import bot_for, diagnostics
 
+EVENTS_COMMITTED = threading.Condition()
+EVENT_WINDOW = 150
+
 APPLICANT = {
     "first_name": "",
     "last_name": "",
@@ -198,6 +201,10 @@ def record(job_id, state, message, url=""):
                 "UPDATE jobs SET status='applied',error='' WHERE id=?", (job_id,)
             )
 
+    # Wake all readers only after the SQLite transaction has committed.
+    with EVENTS_COMMITTED:
+        EVENTS_COMMITTED.notify_all()
+
 
 def application_events():
     with core.connect() as db:
@@ -208,7 +215,8 @@ def application_events():
             [
                 dict(r)
                 for r in db.execute(
-                    "SELECT * FROM application_events ORDER BY id DESC LIMIT 150"
+                    "SELECT * FROM application_events ORDER BY id DESC LIMIT ?",
+                    (EVENT_WINDOW,),
                 )
             ][::-1]
             if exists
