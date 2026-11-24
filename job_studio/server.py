@@ -96,6 +96,7 @@ class Handler(BaseHTTPRequestHandler):
                     payload = read_api.events(
                         int(params.get("after_id", [0])[0]),
                         int(params.get("limit", [20])[0]),
+                        int(params.get("wait_seconds", [0])[0]),
                     )
                 elif target.path == "/api/mcp/status":
                     payload = read_api.status(

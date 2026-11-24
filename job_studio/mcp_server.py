@@ -1,5 +1,6 @@
 """Compact stdio MCP adapter to the running Job Studio HTTP service."""
 
+import asyncio
 import json
 from typing import Literal
 from urllib.error import HTTPError, URLError
@@ -21,7 +22,7 @@ class NoRedirect(HTTPRedirectHandler):
         raise ValueError("Job Studio must not redirect requests")
 
 
-def request(path, payload=None):
+def request(path, payload=None, *, timeout=10):
     try:
         endpoint = json.loads((DATA / "endpoint.json").read_text("utf-8"))
     except (OSError, ValueError):
@@ -49,7 +50,7 @@ def request(path, payload=None):
     )
     try:
         with build_opener(ProxyHandler({}), NoRedirect()).open(
-            req, timeout=10
+            req, timeout=timeout
         ) as response:
             return json.load(response)
     except HTTPError as exc:
@@ -161,12 +162,20 @@ def application_action(
 
 
 @mcp.tool()
-def recent_events(after_id: int = 0, limit: int = 20) -> dict:
-    """Read up to 50 recent application events newer than a cursor. History API retains latest 150 events."""
-    if not 1 <= limit <= 50:
-        raise ValueError("Use limit 1..50")
-    return request(
-        "/api/mcp/events?" + urlencode({"after_id": after_id, "limit": limit})
+async def recent_events(
+    after_id: int = 0, limit: int = 20, wait_seconds: int = 0
+) -> dict:
+    """Read up to 50 events from the latest 150. Wait 0..30 seconds for a commit.
+    On timeout events is empty and next_cursor unchanged. On gap the oldest
+    retained page and a compact recovery checkpoint are returned. Continue from next_cursor.
+    """
+    if after_id < 0 or not 1 <= limit <= 50 or not 0 <= wait_seconds <= 30:
+        raise ValueError("Use after_id >= 0, limit 1..50, wait_seconds 0..30")
+    query = urlencode(
+        {"after_id": after_id, "limit": limit, "wait_seconds": wait_seconds}
+    )
+    return await asyncio.to_thread(
+        request, "/api/mcp/events?" + query, timeout=wait_seconds + 10
     )
 
 

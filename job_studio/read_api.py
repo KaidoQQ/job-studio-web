@@ -1,7 +1,10 @@
 """Small read models shared by the HTTP endpoints used by MCP clients."""
 
+import time
+
 from datetime import datetime, timedelta, timezone
 
+from .applications import EVENTS_COMMITTED, EVENT_WINDOW
 from .core import NEWEST_ORDER, connect
 
 VACANCY_FIELDS = "id,title,company,location,source,status,url,published_at,expires_at"
@@ -50,24 +53,73 @@ def vacancies(query="", status="", offset=0, limit=20):
         }
 
 
-def events(after_id=0, limit=20):
-    _limit(limit)
+def _event_page(after_id, limit):
+    # Bounds, checkpoint and page describe the same committed window.
     with connect() as db:
-        rows = []
+        db.execute("BEGIN")
+        latest = None
+        oldest = 0
         if table_exists(db, "application_events"):
-            # Preserve the existing 150-event retention window, including for stale cursors.
+            latest = db.execute(
+                "SELECT id,job_id,state FROM application_events ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            oldest = (
+                db.execute(
+                    """
+                SELECT min(id) FROM (SELECT id FROM application_events ORDER BY id DESC LIMIT ?)
+            """,
+                    (EVENT_WINDOW,),
+                ).fetchone()[0]
+                or 0
+            )
+        head = latest["id"] if latest else 0
+        # after_id is exclusive: oldest - 1 can still read every requested event.
+        gap = after_id < oldest - 1 or after_id > head
+        cursor = max(0, oldest - 1) if gap else after_id
+        rows = []
+        if head > cursor:
             rows = [
                 dict(row)
                 for row in db.execute(
                     """
-                SELECT id,job_id,state,message,url,created FROM application_events
-                WHERE id>? AND id IN (SELECT id FROM application_events ORDER BY id DESC LIMIT 150)
-                ORDER BY id LIMIT ?
+                SELECT id, job_id, state, message, url, created FROM application_events
+                WHERE id > ? ORDER BY id LIMIT ?
             """,
-                    (after_id, limit),
+                    (cursor, limit),
                 )
             ]
-        return {"events": rows, "next_cursor": rows[-1]["id"] if rows else after_id}
+    result = {
+        "events": rows,
+        "next_cursor": rows[-1]["id"] if rows else cursor,
+        "gap": gap,
+    }
+    if gap:
+        result["recovery"] = {
+            "reason": "cursor_ahead" if after_id > head else "history_gap",
+            "oldest_id": oldest or None,
+            "latest_id": head,
+            "latest_job_id": latest["job_id"] if latest else None,
+            "latest_state": latest["state"] if latest else None,
+        }
+    return result
+
+
+def events(after_id=0, limit=20, wait_seconds=0):
+    _limit(limit)
+    if after_id < 0 or not 0 <= wait_seconds <= 30:
+        raise ValueError("Use after_id >= 0 and wait_seconds 0..30")
+    deadline = time.monotonic() + wait_seconds
+    # A commit between the read and wait cannot lose its notification. No SQLite
+    # transaction remains open while waiting. All clients keep independent cursors.
+    with EVENTS_COMMITTED:
+        while True:
+            page = _event_page(after_id, limit)
+            if page["events"] or page["gap"]:
+                return page
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return page
+            EVENTS_COMMITTED.wait(remaining)
 
 
 def table_exists(db, name):
