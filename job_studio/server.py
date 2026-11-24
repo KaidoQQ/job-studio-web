@@ -6,7 +6,9 @@ import sys
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
+from . import read_api
 from .applications import (
     ApplicationRunner,
     applicant,
@@ -77,6 +79,42 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         elif self.path == "/api/health":
             self.reply({"service": "job-studio", "version": 1})
+        elif self.path.startswith("/api/mcp/"):
+            if self.headers.get("X-Studio-Token") != TOKEN:
+                return self.reply({"error": "Forbidden"}, 403)
+            target = urlsplit(self.path)
+            params = parse_qs(target.query, keep_blank_values=True)
+            try:
+                if target.path == "/api/mcp/vacancies":
+                    payload = read_api.vacancies(
+                        query=params.get("query", [""])[0],
+                        status=params.get("status", [""])[0],
+                        offset=int(params.get("offset", [0])[0]),
+                        limit=int(params.get("limit", [20])[0]),
+                    )
+                elif target.path == "/api/mcp/events":
+                    payload = read_api.events(
+                        int(params.get("after_id", [0])[0]),
+                        int(params.get("limit", [20])[0]),
+                    )
+                elif target.path == "/api/mcp/status":
+                    payload = read_api.status(
+                        RUNNER.state.copy(),
+                        APPLICATIONS.state.copy(),
+                        PARSE_PLUS.state.copy(),
+                    )
+                elif target.path == "/api/mcp/application-diagnostics":
+                    app = APPLICATIONS.state.copy()
+                    payload = {
+                        "job_id": app.get("job_id"),
+                        "message": app.get("message", ""),
+                        "diagnostics": app.get("diagnostics", {}),
+                    }
+                else:
+                    return self.reply({"error": "Not found"}, 404)
+                self.reply(payload)
+            except ValueError as exc:
+                self.reply({"error": str(exc)}, 400)
         elif self.path == "/api/state":
             with connect() as db:
                 jobs = [
