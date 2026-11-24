@@ -1,0 +1,16 @@
+{
+  "name": "job-studio-web-ui",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "esbuild src/main.jsx --bundle --minify --charset=utf8 --legal-comments=eof --outfile=../job_studio/static/studio.js",
+    "watch": "npm run build -- --watch"
+  },
+  "dependencies": {
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

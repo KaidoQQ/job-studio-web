@@ -874,3 +874,4 @@ small.muted {
     bottom: 16px;
   }
 }
+aside nav { display: contents; }
